@@ -1,0 +1,42 @@
+name: Detectar TV en vivo
+
+on:
+  schedule:
+    # Cada 5 minutos. GitHub puede demorar unos minutos en horas pico.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tv
+  cancel-in-progress: true
+
+jobs:
+  detectar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Consultar Graph API
+        env:
+          FB_TOKEN: ${{ secrets.FB_TOKEN }}
+          FB_PAGES: ${{ secrets.FB_PAGES }}
+        run: node scripts/fetch-tv.js
+
+      - name: Publicar si cambió el estado
+        run: |
+          git config user.name  "jhc-bot"
+          git config user.email "actions@github.com"
+          git add tv.json
+          if git diff --staged --quiet; then
+            echo "Sin cambios."
+          else
+            git commit -m "tv: estado $(date -u '+%H:%M UTC')"
+            git push
+          fi

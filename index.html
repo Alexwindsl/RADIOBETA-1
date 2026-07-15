@@ -135,6 +135,9 @@ body.ready .fade-up.d1{animation-delay:.05s}body.ready .fade-up.d2{animation-del
 .np-meta b{display:block;font-size:15px}
 .np-meta small{display:block;color:#6b6b6b;font-size:12px;margin-top:2px}
 .np-vol{flex:0 0 90px;accent-color:var(--yellow-deep,#F2C200)}
+.fuente-badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:#231F20;color:#fff;margin-right:6px}
+.news-nota{font-size:12px;color:#6b6b6b;margin-top:14px;text-align:right}
+.ph-medio{display:grid;place-items:center;height:100%;font-family:Fredoka,sans-serif;font-weight:700;font-size:22px;color:#231F20;background:linear-gradient(135deg,#FFE066,#F2C200)}
 @media(max-width:560px){.np-vol{display:none}}
 
 section{padding:62px 0}
@@ -561,18 +564,66 @@ var STREAM_CANDIDATES = [
 
 /* Noticias */
 var MESES=['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-function fmtFecha(s){var p=s.split('-');return p[2]+' '+MESES[parseInt(p[1],10)-1]+' '+p[0]}
+function fmtFecha(s){var p=s.slice(0,10).split('-');return p[2]+' '+MESES[parseInt(p[1],10)-1]+' '+p[0]}
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+
+/* ===================== NOTICIAS =====================
+   Lee noticias.json (lo regenera GitHub Actions cada hora).
+   Cada tarjeta muestra el medio y enlaza a la nota original.
+   Si el JSON no existe todavía, usa la lista NOTICIAS de arriba. */
 (function(){
-  var lista=NOTICIAS.slice().sort(function(a,b){return b.fecha.localeCompare(a.fecha)});
-  var cont=document.getElementById('news-grid');
-  lista.forEach(function(n,i){
-    var art=document.createElement('article');art.className='card reveal'+(i===0?' feature':'');
-    var thumb=n.imagen?'<img src="'+n.imagen+'" alt="'+n.titulo+'" onerror="this.parentNode.innerHTML=\'<span class=&quot;ph-ico&quot;>JHC</span>\'">':'<span class="ph-ico">JHC</span>';
-    art.innerHTML='<a href="'+n.enlace+'"><div class="thumb"><span class="cat">'+n.categoria+'</span>'+thumb+'</div></a>'
-      +'<div class="body"><time>'+fmtFecha(n.fecha)+'</time><h3><a href="'+n.enlace+'">'+n.titulo+'</a></h3>'
-      +'<p>'+n.resumen+'</p><span class="read">Leer más →</span></div>';
-    cont.appendChild(art);
-  });
+  var cont = document.getElementById('news-grid');
+  if(!cont) return;
+
+  function pinta(lista, agregado, actualizado){
+    cont.innerHTML='';
+    lista.forEach(function(n,i){
+      var art=document.createElement('article');
+      art.className='card reveal'+(i===0?' feature':'');
+
+      var etiqueta = agregado ? (n.regional?'Lambayeque':'Perú') : n.categoria;
+      var enlace   = n.enlace || '#';
+      var externo  = agregado ? ' target="_blank" rel="noopener nofollow"' : '';
+
+      /* Sin fotos de terceros: portada tipográfica con el nombre del medio. */
+      var thumb = agregado
+        ? '<span class="ph-medio">'+esc(n.medio)+'</span>'
+        : (n.imagen
+            ? '<img src="'+n.imagen+'" alt="'+esc(n.titulo)+'" onerror="this.parentNode.innerHTML=\'<span class=&quot;ph-ico&quot;>JHC</span>\'">'
+            : '<span class="ph-ico">JHC</span>');
+
+      var credito = agregado ? '<span class="fuente-badge">'+esc(n.medio)+'</span>' : '';
+      var leer    = agregado ? 'Leer en '+esc(n.medio)+' →' : 'Leer más →';
+
+      art.innerHTML =
+        '<a href="'+enlace+'"'+externo+'><div class="thumb"><span class="cat">'+esc(etiqueta)+'</span>'+thumb+'</div></a>'
+        +'<div class="body"><time>'+fmtFecha(n.fecha)+'</time>'
+        +'<h3>'+credito+'<a href="'+enlace+'"'+externo+'>'+esc(n.titulo)+'</a></h3>'
+        +'<p>'+esc(n.resumen)+'</p><span class="read">'+leer+'</span></div>';
+      cont.appendChild(art);
+    });
+
+    if(agregado){
+      var pie=document.createElement('p');
+      pie.className='news-nota';
+      pie.style.gridColumn='1/-1';
+      pie.textContent='Titulares de medios nacionales · los derechos son de cada medio · actualizado '
+                      + new Date(actualizado).toLocaleString('es-PE',{hour12:false});
+      cont.appendChild(pie);
+    }
+  }
+
+  function respaldo(){
+    pinta(NOTICIAS.slice().sort(function(a,b){return b.fecha.localeCompare(a.fecha)}), false);
+  }
+
+  fetch('noticias.json?v='+Math.floor(Date.now()/300000))
+    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    .then(function(d){
+      if(d && d.items && d.items.length) pinta(d.items, true, d.actualizado);
+      else respaldo();
+    })
+    .catch(respaldo);
 })();
 
 /* Programación (carrusel infinito) */
@@ -614,19 +665,59 @@ function buildFeed(i){
   });
   buildFeed(0);
 
-  // área de video / estado en vivo
-  var frame=document.getElementById('tvFrame');
-  var tag=document.getElementById('tvLiveTag');
-  if(TV_EN_VIVO){
-    document.getElementById('tvbar').classList.add('on');
-    tag.innerHTML='<span class="tag-live"><span class="rdot"></span> En vivo ahora</span>';
-    var href = TV_VIDEO_URL || (FACEBOOK_PAGES[0].url.replace(/\/$/,'')+'/live');
-    var src='https://www.facebook.com/plugins/video.php?height=314&href='+encodeURIComponent(href)+'&show_text=false&autoplay=true';
-    frame.innerHTML='<iframe src="'+src+'" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="TV en vivo"></iframe>';
-  }else{
-    frame.innerHTML='<div class="tv-off"><div class="big"><span class="tvdot"></span>Sin transmisión en este momento</div>'
-      +'<p>Síguenos en Facebook para no perderte el próximo programa en vivo.</p></div>';
+  /* ===================== TV EN VIVO (automático) =====================
+     Lee tv.json, que GitHub Actions regenera cada 5 min consultando la
+     Graph API de Facebook. Sondea cada 60 s: si empiezas a transmitir
+     mientras alguien está en la página, el video aparece solo.
+     TV_EN_VIVO (arriba) sigue funcionando como interruptor manual. */
+  var frame = document.getElementById('tvFrame');
+  var tag   = document.getElementById('tvLiveTag');
+  var bar   = document.getElementById('tvbar');
+  var actual = null;   // firma del estado ya pintado
+
+  function embeber(href, titulo, pagina){
+    var src='https://www.facebook.com/plugins/video.php?height=314&href='
+            +encodeURIComponent(href)+'&show_text=false&autoplay=true';
+    frame.innerHTML='<iframe src="'+src+'" allow="autoplay; encrypted-media; picture-in-picture" '
+                   +'allowfullscreen title="TV en vivo"></iframe>';
+    tag.innerHTML='<span class="tag-live"><span class="rdot"></span> En vivo ahora'
+                  +(pagina?' · '+pagina:'')+'</span>';
+    if(bar) bar.classList.add('on');
   }
+
+  function apagar(){
+    frame.innerHTML='<div class="tv-off"><div class="big"><span class="tvdot"></span>'
+      +'Sin transmisión en este momento</div>'
+      +'<p>Síguenos en Facebook para no perderte el próximo programa en vivo.</p></div>';
+    tag.innerHTML='';
+    if(bar) bar.classList.remove('on');
+  }
+
+  function pintar(d){
+    var firma = d && d.enVivo ? 'live:'+(d.url||'') : 'off';
+    if(firma === actual) return;      // no recargar el iframe en vano
+    actual = firma;
+    if(d && d.enVivo && d.url) embeber(d.url, d.titulo, d.pagina);
+    else apagar();
+  }
+
+  function revisar(){
+    fetch('tv.json?t='+Date.now(), {cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(pintar)
+      .catch(function(){
+        /* Sin tv.json todavía: cae al interruptor manual. */
+        if(TV_EN_VIVO){
+          var href = TV_VIDEO_URL || (FACEBOOK_PAGES[0].url.replace(/\/$/,'')+'/live');
+          pintar({enVivo:true, url:href, pagina:FACEBOOK_PAGES[0].nombre});
+        } else {
+          pintar({enVivo:false});
+        }
+      });
+  }
+
+  revisar();
+  setInterval(revisar, 60000);
 })();
 
 /* ---------- Entrada + reveal ---------- */
