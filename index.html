@@ -127,6 +127,15 @@ body.ready .fade-up.d1{animation-delay:.05s}body.ready .fade-up.d2{animation-del
 .prog-now b{display:block;font-size:1rem}
 .prog-now small{color:var(--gray);font-family:'Space Mono',monospace;font-size:.72rem}
 .player-card iframe{width:100%;height:150px;border:0;border-radius:12px;background:var(--bg-soft)}
+.native-player{display:flex;align-items:center;gap:14px;background:var(--bg-soft);border:1px solid var(--line);border-radius:12px;padding:14px}
+.np-play{flex:0 0 auto;width:56px;height:56px;border-radius:50%;border:0;background:var(--yellow-deep,#F2C200);color:#231F20;font-size:20px;line-height:1;cursor:pointer;display:grid;place-items:center;transition:transform .15s}
+.np-play:active{transform:scale(.94)}
+.np-play[disabled]{opacity:.55;cursor:progress}
+.np-meta{flex:1 1 auto;min-width:0}
+.np-meta b{display:block;font-size:15px}
+.np-meta small{display:block;color:#6b6b6b;font-size:12px;margin-top:2px}
+.np-vol{flex:0 0 90px;accent-color:var(--yellow-deep,#F2C200)}
+@media(max-width:560px){.np-vol{display:none}}
 
 section{padding:62px 0}
 .sec-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:28px;flex-wrap:wrap}
@@ -343,7 +352,18 @@ const LOGO_WHITE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAApQAAAC2CAYAAA
         <div class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div></div>
       <div class="prog-now"><div class="ph">EN</div>
         <div><b>En Directo</b><small>Luis Felipe Romero · 6:00–8:55 am</small></div></div>
-      <iframe title="Reproductor en vivo Radio JHC" src="https://sp.oyotunstream.com/cp/widgets/player/single/?p=8076" loading="lazy"></iframe>
+      <div class="native-player" id="nativePlayer">
+        <button class="np-play" id="npPlay" aria-label="Reproducir radio en vivo" disabled>▶</button>
+        <div class="np-meta">
+          <b id="npTitle">Radio JHC 1330 AM</b>
+          <small id="npState">Buscando señal…</small>
+        </div>
+        <input class="np-vol" id="npVol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volumen">
+        <audio id="npAudio" preload="none" crossorigin="anonymous" playsinline></audio>
+      </div>
+      <iframe id="npFallback" style="display:none;margin-top:12px" title="Reproductor en vivo Radio JHC"
+              src="about:blank" data-src="https://sp.oyotunstream.com/cp/widgets/player/single/?p=8076"
+              allow="autoplay; encrypted-media"></iframe>
     </div>
   </div>
 </header>
@@ -451,6 +471,89 @@ document.getElementById('loaderLogo').src= LOGO_COLOR;
 function toggleMenu(btn){var l=document.getElementById('navlinks');btn.setAttribute('aria-expanded',l.classList.toggle('open'))}
 document.querySelectorAll('#navlinks a').forEach(function(a){a.addEventListener('click',function(){document.getElementById('navlinks').classList.remove('open')})});
 function irA(id){document.getElementById(id).scrollIntoView({behavior:'smooth'})}
+
+/* ===================== REPRODUCTOR NATIVO ===================== */
+/* Candidatos de stream. El primero que responda gana.
+   Si ya conoces la URL exacta, déjala sola en esta lista. */
+var STREAM_CANDIDATES = [
+  "https://sp.oyotunstream.com:8076/stream",
+  "https://sp.oyotunstream.com:8076/;stream.mp3",
+  "https://sp.oyotunstream.com:8076/live",
+  "https://sp.oyotunstream.com:8076/radio.mp3"
+];
+
+(function(){
+  var audio = document.getElementById('npAudio');
+  var btn   = document.getElementById('npPlay');
+  var state = document.getElementById('npState');
+  var vol   = document.getElementById('npVol');
+  var fb    = document.getElementById('npFallback');
+  var wrap  = document.getElementById('nativePlayer');
+  if(!audio) return;
+
+  var streamURL = null, playing = false;
+
+  function probe(url){
+    return new Promise(function(res){
+      var a = new Audio();
+      a.preload = 'metadata';
+      a.crossOrigin = 'anonymous';
+      var done = false;
+      function ok(){ if(done) return; done=true; clearTimeout(t); a.src=''; res(true); }
+      function no(){ if(done) return; done=true; clearTimeout(t); a.src=''; res(false); }
+      var t = setTimeout(no, 6000);
+      a.addEventListener('loadedmetadata', ok);
+      a.addEventListener('progress', ok);
+      a.addEventListener('canplay', ok);
+      a.addEventListener('error', no);
+      a.src = url;
+      a.load();
+    });
+  }
+
+  async function detect(){
+    for(var i=0;i<STREAM_CANDIDATES.length;i++){
+      var url = STREAM_CANDIDATES[i];
+      if(await probe(url)){ return url; }
+    }
+    return null;
+  }
+
+  function useFallback(){
+    wrap.style.display = 'none';
+    fb.style.display = 'block';
+    if(fb.src === 'about:blank') fb.src = fb.dataset.src;
+  }
+
+  function setPlaying(on){
+    playing = on;
+    btn.textContent = on ? '❚❚' : '▶';
+    btn.setAttribute('aria-label', on ? 'Pausar radio en vivo' : 'Reproducir radio en vivo');
+    state.textContent = on ? 'Transmitiendo en vivo' : 'Listo · toca para escuchar';
+  }
+
+  btn.addEventListener('click', function(){
+    if(!streamURL) return;
+    if(playing){ audio.pause(); audio.src=''; setPlaying(false); return; }
+    /* Se asigna el src DENTRO del gesto del usuario: requisito de iOS/Android */
+    state.textContent = 'Conectando…';
+    audio.src = streamURL + (streamURL.indexOf('?')>-1?'&':'?') + '_=' + Date.now();
+    audio.load();
+    audio.play().then(function(){ setPlaying(true); })
+                .catch(function(){ state.textContent='No se pudo reproducir'; useFallback(); });
+  });
+
+  vol.addEventListener('input', function(){ audio.volume = parseFloat(vol.value); });
+  audio.addEventListener('playing', function(){ setPlaying(true); });
+  audio.addEventListener('pause',   function(){ setPlaying(false); });
+  audio.addEventListener('stalled', function(){ state.textContent='Reconectando…'; });
+  audio.addEventListener('error',   function(){ if(playing){ state.textContent='Señal interrumpida'; setPlaying(false); } });
+
+  detect().then(function(url){
+    if(url){ streamURL = url; btn.disabled = false; setPlaying(false); }
+    else { useFallback(); }
+  });
+})();
 
 /* Onda del hero */
 (function(){var alturas=[30,45,60,80,55,70,95,75,100,80,95,70,90,60,75,50,65,40,55,35,45,30];
